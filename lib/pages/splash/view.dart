@@ -795,11 +795,13 @@ class _PullToRefreshWrapperState extends State<_PullToRefreshWrapper>
     with SingleTickerProviderStateMixin {
   static const double refreshThreshold = 80.0;
   static const double stretchThreshold = 150.0;
+  static const double minTriggerDistance = 30.0; // 最小触发距离，避免惯性滚动误触
 
   double _pullDistance = 0.0;
   double _maxPullDistance = 0.0;  // 记录本次下拉的最大距离
   bool _isReleased = false;  // 标记用户是否已经松手
   bool _isOpened = false;    // 标记是否已经触发过全屏展示
+  bool _isTouching = false;  // 🔥 新增：标记用户手指是否在屏幕上
   _PullRefreshStatus _status = _PullRefreshStatus.idle;
   late AnimationController _completionController;
 
@@ -824,6 +826,11 @@ class _PullToRefreshWrapperState extends State<_PullToRefreshWrapper>
         _status == _PullRefreshStatus.fullScreening ||
         _status == _PullRefreshStatus.completing) {
       return _status; // 不在操作过程中更新状态
+    }
+    
+    // 只有超过最小触发距离才显示下拉状态，避免惯性滚动误触
+    if (distance < minTriggerDistance) {
+      return _PullRefreshStatus.idle;
     }
     
     if (distance >= stretchThreshold) {
@@ -851,13 +858,13 @@ class _PullToRefreshWrapperState extends State<_PullToRefreshWrapper>
     // if at top, negative pixels indicate overscroll (pull down)
     // 修改条件：允许在顶部附近（extentBefore <= 1.0）时也能触发
     if (metrics.extentBefore <= 1.0) {
-      // ScrollEndNotification 作为兜底方案
-      // 适用场景：某些设备或特殊情况下，距离减小检测可能失效
-      // 例如：快速下拉松手、设备性能问题导致的帧丢失等
+      // ScrollEndNotification - 用户真正松手的信号
+      // 这是判断用户是否松手的唯一可靠方式
       if (notification is ScrollEndNotification) {
-        // 场景1：兜底触发 - 还没触发过 且 有足够的下拉距离 且 没有打开全屏
-        if (!_isReleased && !_isOpened && _maxPullDistance > 10) {
-          print('🔚 ScrollEnd 兜底触发（距离检测可能失效）');
+        // 场景1：用户松手触发 - 还没触发过 且 有足够的下拉距离 且 没有打开全屏
+        // 使用 minTriggerDistance 避免惯性滚动误触
+        if (!_isReleased && !_isOpened && _maxPullDistance > minTriggerDistance) {
+          print('🔚 ScrollEnd 检测到松手，触发释放逻辑（maxDistance=${_maxPullDistance.toStringAsFixed(1)}px）');
           _isReleased = true;
           _isOpened = true;
           _onRelease();
@@ -893,6 +900,26 @@ class _PullToRefreshWrapperState extends State<_PullToRefreshWrapper>
         if (delta < 0) {
           newPull = (_pullDistance + -delta).clamp(0.0, stretchThreshold * 2);
         }
+        
+        // 🔥 关键优化：检测手指是否已离开屏幕
+        // 优先使用 _isTouching 标志（通过 Listener 监听得到，最准确）
+        // 
+        // 关键条件：
+        // 1. 手指已离开 (!_isTouching)
+        // 2. 还未触发过 (!_isReleased && !_isOpened)
+        // 3. 曾经下拉超过阈值 (_maxPullDistance > minTriggerDistance)
+        // 4. 当前仍有下拉距离 (_pullDistance > 0) ← 防止用户拉回到 0 后仍触发
+        if (!_isTouching && 
+            !_isReleased && 
+            !_isOpened && 
+            _maxPullDistance > minTriggerDistance &&
+            _pullDistance > 0) {  // ✅ 新增：必须当前仍有下拉距离
+          print('🚀 检测到松手（_isTouching=false），立即触发释放！maxDistance=${_maxPullDistance.toStringAsFixed(1)}px, currentDistance=${_pullDistance.toStringAsFixed(1)}px');
+          _isReleased = true;
+          _isOpened = true;
+          _onRelease();
+          return;
+        }
       } else if (notification is ScrollUpdateNotification) {
         if (notification.metrics.pixels < 0) {
           newPull = (-notification.metrics.pixels).clamp(
@@ -915,16 +942,9 @@ class _PullToRefreshWrapperState extends State<_PullToRefreshWrapper>
           _isOpened = false;  // ✅ 也重置 _isOpened，表示新的一次下拉
         }
         
-        // 🔥 关键检测：如果距离开始减小（用户松手，开始回弹），立即触发释放逻辑
-        // 只在未触发过的情况下触发一次
-        if (!_isReleased && !_isOpened && newPull < _maxPullDistance && _maxPullDistance > 10) {
-          print('🎯 检测到松手！distance=${newPull.toStringAsFixed(1)} < max=${_maxPullDistance.toStringAsFixed(1)}');
-          _isReleased = true;
-          _isOpened = true; // 标记已经触发过全屏展示
-          // 立即触发释放，不等待回弹动画结束
-          _onRelease();
-          return;  // ✅ 直接返回，不更新状态
-        }
+        // ❌ 移除距离减小检测逻辑，避免误判
+        // 用户可能只是稍微往回拉一点，并不代表松手
+        // 真正的松手应该由 ScrollEndNotification 来判断
         
         // 如果已经触发过释放，在回弹过程中只更新距离，不更新状态
         // 这样可以避免状态在 idle 和 pulling 之间反复切换
@@ -1067,14 +1087,66 @@ class _PullToRefreshWrapperState extends State<_PullToRefreshWrapper>
         ? ((_pullDistance - refreshThreshold) / (stretchThreshold - refreshThreshold)).clamp(0.0, 1.0)
         : 0.0;
 
-    return NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        _handleNotification(notification);
-        return false;
+    return Listener(
+      // 🔥 核心优化：直接监听触摸事件，精确判断手指是否在屏幕上
+      onPointerDown: (event) {
+        print('👆 手指按下：_isTouching = true');
+        _isTouching = true;
+        // 🔥 手指按下时，如果之前的操作已经完成（状态为 idle），重置所有标志
+        // 这样可以确保每次新的触摸都是全新的开始
+        if (_status == _PullRefreshStatus.idle && _pullDistance == 0) {
+          _isReleased = false;
+          _isOpened = false;
+          _maxPullDistance = 0.0;
+        }
       },
-      child: Stack(
-        children: [
-          widget.child,
+      onPointerUp: (event) {
+        print('👆 手指抬起：_isTouching = false, pullDistance=${_pullDistance.toStringAsFixed(1)}, maxDistance=${_maxPullDistance.toStringAsFixed(1)}, status=$_status');
+        _isTouching = false;
+        
+        // 🚀 立即检查是否需要触发释放逻辑
+        // 这是最可靠的松手检测时机
+        // 
+        // 关键条件：
+        // 1. 还未触发过释放 (!_isReleased && !_isOpened)
+        // 2. 曾经下拉超过阈值 (_maxPullDistance > minTriggerDistance)
+        // 3. 当前仍有明显的下拉距离 (_pullDistance > 10)
+        //    如果用户拉回到接近 0（< 10px），视为取消操作
+        if (!_isReleased && 
+            !_isOpened && 
+            _maxPullDistance > minTriggerDistance &&
+            _pullDistance > 10) {  // ✅ 修改：必须当前距离 > 10px，否则视为取消
+          print('🎯 手指抬起触发释放逻辑！maxDistance=${_maxPullDistance.toStringAsFixed(1)}px, currentDistance=${_pullDistance.toStringAsFixed(1)}px');
+          _isReleased = true;
+          _isOpened = true;
+          _onRelease();
+        } else {
+          print('⚪ 手指抬起但不触发（可能是取消操作）：pullDistance=${_pullDistance.toStringAsFixed(1)}, maxDistance=${_maxPullDistance.toStringAsFixed(1)}, status=$_status');
+          // 🔄 用户取消操作，重置状态
+          if (_pullDistance <= 10 && _maxPullDistance > 0) {
+            print('🔄 检测到取消操作，重置状态');
+            setState(() {
+              _pullDistance = 0.0;
+              _maxPullDistance = 0.0;
+              _status = _PullRefreshStatus.idle;
+              _isReleased = false;
+              _isOpened = false;
+            });
+          }
+        }
+      },
+      onPointerCancel: (event) {
+        print('👆 触摸取消：_isTouching = false');
+        _isTouching = false;
+      },
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          _handleNotification(notification);
+          return false;
+        },
+        child: Stack(
+          children: [
+            widget.child,
           // Top indicator with enhanced visual feedback
           Positioned(
             // 使用 viewPadding.top 以避开刘海/灵动岛等安全区
@@ -1104,6 +1176,7 @@ class _PullToRefreshWrapperState extends State<_PullToRefreshWrapper>
             ),
           ),
         ],
+        ),
       ),
     );
   }

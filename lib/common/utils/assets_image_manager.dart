@@ -4,6 +4,23 @@
 class AssetsImageManager {
   // 图片文件列表 - 自动生成
   static const List<String> _imageFiles = [
+    '126351103_p0_master1200.jpg',
+    '126351103_p1_master1200.jpg',
+    '126351103_p2_master1200.jpg',
+    '126351103_p3_master1200.jpg',
+    '126351103_p4_master1200.jpg',
+    '126351103_p5_master1200.jpg',
+    '126351103_p6_master1200.jpg',
+    '126351103_p7_master1200.jpg',
+    '126351103_p8_master1200.jpg',
+    '126351103_p9_master1200.jpg',
+    '128181590_p0_master1200.jpg',
+    '128181590_p1_master1200.jpg',
+    '128181590_p2_master1200.jpg',
+    '128181590_p3_master1200.jpg',
+    '128181590_p4_master1200.jpg',
+    '128181590_p5_master1200.jpg',
+    '128181590_p6_master1200.jpg',
   ];
 
   /// 获取所有图片的完整路径

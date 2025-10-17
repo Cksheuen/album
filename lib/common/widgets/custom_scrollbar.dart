@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -53,58 +54,49 @@ class CustomScrollbarWithIndicator extends StatelessWidget {
         onVerticalDragUpdate: (details) => ctrl.onDragUpdate(details),
         onVerticalDragEnd: (details) => ctrl.onDragEnd(),
         child: MouseRegion(
-          onEnter: (_) => ctrl.isHovering.value = true,
-          onExit: (_) => ctrl.isHovering.value = false,
-          child: AnimatedContainer(
-            duration: Duration(milliseconds: 200),
-            width: ctrl.isDragging.value || ctrl.isHovering.value ? 50 : 40,
-            height: scrollbarHeight,
-            child: Stack(
-              children: [
-                Positioned(
-                  right: 8,
-                  top: 0,
-                  bottom: 0,
-                  child: AnimatedContainer(
-                    duration: Duration(milliseconds: 200),
-                    width: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
+          onEnter: (_) => ctrl.onMouseEnter(),
+          onExit: (_) => ctrl.onMouseExit(),
+          child: AnimatedOpacity(
+            // 滚动时显示，静止时隐藏
+            opacity: ctrl.isScrolling.value || ctrl.isHovering.value || ctrl.isDragging.value ? 1.0 : 0.0,
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+            child: Container(
+              width: ctrl.isHovering.value || ctrl.isDragging.value ? 20 : 8,
+              height: scrollbarHeight,
+              padding: EdgeInsets.only(right: 2),
+              child: AnimatedContainer(
+                duration: Duration(milliseconds: 200),
+                decoration: BoxDecoration(
+                  color: Colors.grey.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(4),
                 ),
-                AnimatedPositioned(
-                  duration: ctrl.isDragging.value
-                      ? Duration.zero
-                      : Duration(milliseconds: 200),
-                  curve: Curves.easeOut,
-                  right: 4,
-                  // 计算滑块位置：scrollPosition * (可用空间)
-                  // 可用空间 = scrollbarHeight - thumbHeight
-                  top:
-                      ctrl.thumbPosition.value *
-                      (scrollbarHeight - ctrl.thumbHeight.value),
-                  child: AnimatedContainer(
-                    duration: Duration(milliseconds: 200),
-                    width: 12,
-                    height: ctrl.thumbHeight.value,
-                    decoration: BoxDecoration(
-                      color: Color(0xFF2196F3),
-                      borderRadius: BorderRadius.circular(6),
-                      boxShadow: ctrl.isDragging.value
-                          ? [
-                              BoxShadow(
-                                color: Color(0xFF2196F3).withOpacity(0.3),
-                                blurRadius: 8,
-                                spreadRadius: 2,
-                              ),
-                            ]
-                          : [],
+                child: Stack(
+                  children: [
+                    // 滑块
+                    AnimatedPositioned(
+                      duration: ctrl.isDragging.value
+                          ? Duration.zero
+                          : Duration(milliseconds: 200),
+                      curve: Curves.easeOut,
+                      left: 0,
+                      right: 0,
+                      top: ctrl.thumbPosition.value *
+                          (scrollbarHeight - ctrl.thumbHeight.value),
+                      child: AnimatedContainer(
+                        duration: Duration(milliseconds: 200),
+                        height: ctrl.thumbHeight.value,
+                        decoration: BoxDecoration(
+                          color: ctrl.isHovering.value || ctrl.isDragging.value
+                              ? Colors.grey.withOpacity(0.8)
+                              : Colors.grey.withOpacity(0.6),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -163,6 +155,7 @@ class _ScrollbarController extends GetxController {
 
   final RxBool isDragging = false.obs;
   final RxBool isHovering = false.obs;
+  final RxBool isScrolling = false.obs;  // ✅ 添加滚动状态
   final RxBool showScrollbar = false.obs;
   final RxBool showIndicator = false.obs;
   final RxString currentGroupTitle = ''.obs;
@@ -174,6 +167,9 @@ class _ScrollbarController extends GetxController {
 
   // 记录拖拽开始时的偏移量
   double _dragStartOffset = 0.0;
+  
+  // 滚动停止计时器
+  Timer? _scrollTimer;
 
   @override
   void onInit() {
@@ -184,8 +180,23 @@ class _ScrollbarController extends GetxController {
 
   @override
   void onClose() {
+    _scrollTimer?.cancel();
     scrollController.removeListener(_onScroll);
     super.onClose();
+  }
+
+  /// 鼠标进入滚动条区域
+  void onMouseEnter() {
+    isHovering.value = true;
+    showIndicator.value = true;  // 悬停时显示组名
+  }
+
+  /// 鼠标离开滚动条区域
+  void onMouseExit() {
+    isHovering.value = false;
+    if (!isDragging.value) {
+      showIndicator.value = false;  // 不拖拽时隐藏组名
+    }
   }
 
   /// 更新分组标题列表
@@ -236,6 +247,18 @@ class _ScrollbarController extends GetxController {
 
   void _onScroll() {
     if (isDragging.value) return;
+    
+    // 标记正在滚动
+    isScrolling.value = true;
+    
+    // 取消之前的计时器
+    _scrollTimer?.cancel();
+    
+    // 设置新的计时器：500ms 后认为滚动停止
+    _scrollTimer = Timer(Duration(milliseconds: 500), () {
+      isScrolling.value = false;
+    });
+    
     _updateScrollMetrics();
 
     if (onScrollPositionChanged != null && scrollController.hasClients) {
@@ -257,12 +280,12 @@ class _ScrollbarController extends GetxController {
 
   void onDragStart(DragStartDetails details) {
     isDragging.value = true;
-    showIndicator.value = true;
+    showIndicator.value = true;  // 拖拽时显示组名
 
     // 记录拖拽开始时，触摸点在滑块内的相对位置
     final screenHeight = MediaQuery.of(Get.context!).size.height;
     final scrollbarHeight = screenHeight * 0.6;
-    final thumbTop = thumbPosition.value * scrollbarHeight;
+    final thumbTop = thumbPosition.value * (scrollbarHeight - thumbHeight.value);
 
     // 计算触摸点相对于滑块顶部的偏移
     _dragStartOffset = details.localPosition.dy - thumbTop;
@@ -297,8 +320,9 @@ class _ScrollbarController extends GetxController {
 
   void onDragEnd() {
     isDragging.value = false;
-    Future.delayed(Duration(milliseconds: 500), () {
-      if (!isDragging.value) {
+    // 拖拽结束后延迟隐藏组名指示器
+    Future.delayed(Duration(milliseconds: 300), () {
+      if (!isDragging.value && !isHovering.value) {
         showIndicator.value = false;
       }
     });

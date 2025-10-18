@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../models/photo_model.dart';
 import '../../mock/photo_mock_data.dart';
@@ -447,7 +447,28 @@ class SplashController extends GetxController {
   /// 切换自动滚动到新内容的设置
   void toggleAutoScrollToNew() {
     _autoScrollToNew.value = !_autoScrollToNew.value;
-    print('🔄 自动滚动到新内容: ${_autoScrollToNew.value ? "开启" : "关闭"}');
+    final status = _autoScrollToNew.value ? "开启" : "关闭";
+    print('🔄 自动滚动到新内容: $status');
+    
+    // 显示切换成功的提示
+    Get.snackbar(
+      '自动滚动已$status',
+      _autoScrollToNew.value 
+        ? '加载新图片后将自动滚动到新位置' 
+        : '加载新图片后不再自动滚动',
+      snackPosition: SnackPosition.TOP,
+      duration: const Duration(seconds: 2),
+      backgroundColor: Colors.black.withOpacity(0.7),
+      colorText: Colors.white,
+      margin: const EdgeInsets.all(16),
+      borderRadius: 8,
+      icon: Icon(
+        _autoScrollToNew.value 
+          ? Icons.vertical_align_bottom 
+          : Icons.vertical_align_center,
+        color: Colors.white,
+      ),
+    );
   }
 
   /// 显示插入占位符在指定位置
@@ -509,26 +530,52 @@ class SplashController extends GetxController {
     final groupPhotos = _groupedPhotos[groupKey]!;
     
     // 4. 计算合适的日期：使用目标位置附近照片的日期
+    // 语义：position 表示新照片将要占据的位置索引
+    //      原位置及之后的照片将后移
+    // 
+    // 🔧 关键修复：必须根据当前排序方向计算日期
+    //    - 降序（默认）：索引0是最新的，末尾是最旧的
+    //    - 升序：索引0是最旧的，末尾是最新的
+    final isDescending = _currentSortType.value == SortType.dateDesc;
+    
     DateTime targetDate;
     if (groupPhotos.isEmpty) {
       // 组为空，使用当前时间
       targetDate = DateTime.now();
     } else {
-      // 使用目标位置的照片日期，确保插入后排序正确
       final targetPosition = position.clamp(0, groupPhotos.length);
       
       if (targetPosition >= groupPhotos.length) {
-        // 插入到最后，使用最后一张照片的日期稍后一点
-        targetDate = groupPhotos.last.date.add(const Duration(seconds: 1));
+        // 插入到所有照片之后（追加到末尾）
+        // 降序：末尾是最旧的，需要更旧的日期（-1秒）
+        // 升序：末尾是最新的，需要更新的日期（+1秒）
+        if (isDescending) {
+          targetDate = groupPhotos.last.date.subtract(const Duration(seconds: 1));
+          print('📍 插入位置: 追加到末尾（降序，使用更旧的日期）');
+        } else {
+          targetDate = groupPhotos.last.date.add(const Duration(seconds: 1));
+          print('📍 插入位置: 追加到末尾（升序，使用更新的日期）');
+        }
       } else if (targetPosition == 0) {
-        // 插入到最前，使用第一张照片的日期稍早一点
-        targetDate = groupPhotos.first.date.subtract(const Duration(seconds: 1));
+        // 插入到最前面（占据索引0）
+        // 降序：开头是最新的，需要更新的日期（+1秒）
+        // 升序：开头是最旧的，需要更旧的日期（-1秒）
+        if (isDescending) {
+          targetDate = groupPhotos.first.date.add(const Duration(seconds: 1));
+          print('📍 插入位置: 最前面（降序，使用更新的日期）');
+        } else {
+          targetDate = groupPhotos.first.date.subtract(const Duration(seconds: 1));
+          print('📍 插入位置: 最前面（升序，使用更旧的日期）');
+        }
       } else {
-        // 插入到中间，使用前后两张照片日期的中间值
+        // 插入到中间某个位置（占据索引 targetPosition）
+        // 使用目标位置前一张照片的日期和目标位置照片的日期的中间值
+        // 这样新照片会排在 [targetPosition-1] 和 [targetPosition] 之间
         final beforeDate = groupPhotos[targetPosition - 1].date;
         final afterDate = groupPhotos[targetPosition].date;
         final millisBetween = afterDate.millisecondsSinceEpoch - beforeDate.millisecondsSinceEpoch;
         targetDate = beforeDate.add(Duration(milliseconds: millisBetween ~/ 2));
+        print('📍 插入位置: 索引 $targetPosition (在 [${targetPosition-1}] 和 [$targetPosition] 之间)');
       }
     }
     
@@ -675,6 +722,171 @@ class SplashController extends GetxController {
         curve: Curves.easeOut,
       );
     }
+  }
+
+  /// ==================== 照片操作方法 ====================
+  
+  /// 删除照片
+  void deletePhoto(String photoPath) {
+    try {
+      // 从所有照片列表中删除
+      _allPhotos.removeWhere((photo) => photo.path == photoPath);
+      
+      // 重新分组
+      _updateGroupedPhotos();
+      
+      // 显示成功提示
+      Get.snackbar(
+        '已删除',
+        '照片已从相册中删除',
+        snackPosition: SnackPosition.TOP,
+        duration: const Duration(seconds: 2),
+        backgroundColor: Colors.black.withOpacity(0.7),
+        colorText: Colors.white,
+        icon: const Icon(Icons.delete_outline, color: Colors.white),
+        margin: const EdgeInsets.all(16),
+        borderRadius: 8,
+      );
+      
+      print('🗑️ 删除照片: $photoPath');
+    } catch (e) {
+      Get.snackbar(
+        '删除失败',
+        '无法删除照片: $e',
+        snackPosition: SnackPosition.TOP,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      print('❌ 删除照片失败: $e');
+    }
+  }
+
+  /// 分享照片
+  void sharePhoto(String photoPath) {
+    // TODO: 实现分享功能，需要使用 share_plus 插件
+    Get.snackbar(
+      '分享',
+      '分享功能开发中...',
+      snackPosition: SnackPosition.TOP,
+      duration: const Duration(seconds: 2),
+      backgroundColor: Colors.blue.withOpacity(0.9),
+      colorText: Colors.white,
+      icon: const Icon(Icons.share, color: Colors.white),
+      margin: const EdgeInsets.all(16),
+      borderRadius: 8,
+    );
+    print('📤 分享照片: $photoPath');
+  }
+
+  /// 编辑照片
+  void editPhoto(String photoPath) {
+    // TODO: 实现编辑功能，需要集成图片编辑器
+    Get.snackbar(
+      '编辑',
+      '编辑功能开发中...',
+      snackPosition: SnackPosition.TOP,
+      duration: const Duration(seconds: 2),
+      backgroundColor: Colors.orange.withOpacity(0.9),
+      colorText: Colors.white,
+      icon: const Icon(Icons.edit, color: Colors.white),
+      margin: const EdgeInsets.all(16),
+      borderRadius: 8,
+    );
+    print('✏️ 编辑照片: $photoPath');
+  }
+
+  /// 查看照片详情
+  void viewPhotoDetails(String photoPath) {
+    // 查找照片信息
+    final photo = _allPhotos.firstWhereOrNull((p) => p.path == photoPath);
+    
+    if (photo == null) {
+      Get.snackbar('错误', '找不到照片信息');
+      return;
+    }
+
+    Get.dialog(
+      AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.blue),
+            SizedBox(width: 12),
+            Text('照片详情'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildDetailRow('路径', photo.path),
+            const SizedBox(height: 8),
+            _buildDetailRow('日期', photo.date.toString().split('.')[0]),
+            const SizedBox(height: 8),
+            if (photo.title != null) 
+              _buildDetailRow('标题', photo.title!),
+            if (photo.tags != null && photo.tags!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _buildDetailRow('标签', photo.tags!.join(', ')),
+            ],
+            const SizedBox(height: 8),
+            _buildDetailRow('类型', photo.isNetworkImage ? '网络图片' : '本地图片'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(),
+            child: const Text('关闭'),
+          ),
+        ],
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+      ),
+    );
+    
+    print('ℹ️ 查看照片详情: $photoPath');
+  }
+
+  /// 构建详情行
+  Widget _buildDetailRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 60,
+          child: Text(
+            '$label:',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[700],
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(color: Colors.grey[800]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 设为壁纸
+  void setAsWallpaper(String photoPath) {
+    // TODO: 实现设为壁纸功能，需要使用平台特定代码
+    Get.snackbar(
+      '设为壁纸',
+      '壁纸功能开发中...',
+      snackPosition: SnackPosition.TOP,
+      duration: const Duration(seconds: 2),
+      backgroundColor: Colors.purple.withOpacity(0.9),
+      colorText: Colors.white,
+      icon: const Icon(Icons.wallpaper, color: Colors.white),
+      margin: const EdgeInsets.all(16),
+      borderRadius: 8,
+    );
+    print('🖼️ 设为壁纸: $photoPath');
   }
 
   @override

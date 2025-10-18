@@ -10,6 +10,8 @@ import '../../common/widgets/custom_scrollbar.dart';
 import '../../common/widgets/photo_image.dart';
 import '../../common/widgets/photo_loading_placeholder.dart';
 import '../../common/widgets/insert_photo_toolbar.dart';
+import '../../common/widgets/photo_options_sheet.dart';
+import '../../models/photo_model.dart';
 
 class SplashPage extends GetView<SplashController> {
   SplashPage({super.key});
@@ -330,13 +332,13 @@ class SplashPage extends GetView<SplashController> {
                     Obx(() => IconButton(
                       icon: Icon(
                         controller.autoScrollToNew 
-                          ? Icons.arrow_downward 
-                          : Icons.arrow_downward_outlined,
+                          ? Icons.vertical_align_bottom 
+                          : Icons.vertical_align_center,
                         color: Colors.white,
                       ),
                       tooltip: controller.autoScrollToNew 
-                        ? '自动滚动: 开启' 
-                        : '自动滚动: 关闭',
+                        ? '点击关闭自动滚动' 
+                        : '点击开启自动滚动',
                       onPressed: () {
                         controller.toggleAutoScrollToNew();
                       },
@@ -695,7 +697,7 @@ class _VirtualizedGroupedGridState extends State<_VirtualizedGroupedGrid> {
       photoWidget = InkWell(
         onTap: () => widget.onImageTap(photo.path),
         onLongPress: () {
-          // keep existing behavior placeholder
+          _showPhotoOptions(photo);
         },
         child: Container(
           decoration: BoxDecoration(
@@ -721,8 +723,16 @@ class _VirtualizedGroupedGridState extends State<_VirtualizedGroupedGrid> {
           return details.data['type'] == 'placeholder';
         },
         onAcceptWithDetails: (details) {
-          // 占位符被拖放到此位置，更新占位符位置
-          widget.onPlaceholderDragged?.call(groupKey, position);
+          // 占位符被拖放到此位置
+          // 🔧 修复：如果拖到最后一张照片，将其视为"插入到末尾"
+          final groupPhotos = widget.groupedPhotos[groupKey] ?? [];
+          final isLastPhoto = position == groupPhotos.length - 1;
+          final actualPosition = isLastPhoto ? groupPhotos.length : position;
+          
+          print('🎯 拖放到照片: 组=$groupKey, 照片索引=$position, '
+               '实际位置=$actualPosition ${isLastPhoto ? "(末尾)" : ""}');
+          
+          widget.onPlaceholderDragged?.call(groupKey, actualPosition);
         },
         builder: (context, candidateData, rejectedData) {
           // 如果正在悬停，显示视觉反馈
@@ -1096,7 +1106,7 @@ class _VirtualizedGroupedGridState extends State<_VirtualizedGroupedGrid> {
                         heroTag, 
                         itemSize,
                         groupKey: groupTitle,
-                        position: i,
+                        position: photoIndex,  // 🔧 修复：使用照片实际索引而不是网格位置
                       ),
                     ),
                   ),
@@ -1178,6 +1188,21 @@ class _VirtualizedGroupedGridState extends State<_VirtualizedGroupedGrid> {
           child: Stack(clipBehavior: Clip.none, children: children),
         );
       },
+    );
+  }
+
+  /// 显示照片选项菜单
+  void _showPhotoOptions(PhotoModel photo) {
+    // 获取 controller
+    final controller = Get.find<SplashController>();
+    
+    PhotoOptionsSheet.show(
+      photoPath: photo.path,
+      onDelete: () => controller.deletePhoto(photo.path),
+      onShare: () => controller.sharePhoto(photo.path),
+      onEdit: () => controller.editPhoto(photo.path),
+      onViewDetails: () => controller.viewPhotoDetails(photo.path),
+      onSetAsWallpaper: () => controller.setAsWallpaper(photo.path),
     );
   }
 }

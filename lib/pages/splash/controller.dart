@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
 import '../../models/photo_model.dart';
 import '../../mock/photo_mock_data.dart';
@@ -23,6 +25,23 @@ class SplashController extends GetxController {
   
   // 自动滚动到新内容的控制
   final RxBool _autoScrollToNew = true.obs;
+  
+  // 插入占位符的位置信息
+  final RxString _insertPlaceholderGroup = ''.obs;
+  final RxInt _insertPlaceholderPosition = (-1).obs;
+  
+  // 插入占位符显示的选中图片信息
+  final RxString _selectedImagePath = ''.obs;
+  final RxBool _isSelectedImageFromAssets = true.obs;
+  
+  // 防抖计时器，避免频繁更新
+  Timer? _placeholderUpdateTimer;
+  
+  // 滚动控制器（由 View 层设置）
+  ScrollController? scrollController;
+  
+  // 插入面板是否显示
+  final RxBool _isInsertPanelVisible = false.obs;
   
   // 新图片加载回调（通知 UI 滚动到底部）
   Function()? onNewPhotoLoaded;
@@ -53,6 +72,7 @@ class SplashController extends GetxController {
   Map<String, List<PhotoModel>> get groupedPhotos => Map.from(_groupedPhotos);
   GroupType get currentGroupType => _currentGroupType.value;
   SortType get currentSortType => _currentSortType.value;
+  bool get isInsertPanelVisible => _isInsertPanelVisible.value;
   bool get isLoading => _isLoading.value;
   bool get isLoadingMore => _isLoadingMore.value;
   bool get hasMore => _hasMore;
@@ -63,6 +83,16 @@ class SplashController extends GetxController {
   
   // 是否自动滚动到新内容
   bool get autoScrollToNew => _autoScrollToNew.value;
+  
+  // 获取插入占位符的位置信息
+  String get insertPlaceholderGroup => _insertPlaceholderGroup.value;
+  int get insertPlaceholderPosition => _insertPlaceholderPosition.value;
+  bool get hasInsertPlaceholder => _insertPlaceholderGroup.value.isNotEmpty;
+  
+  // 获取选中的图片信息
+  String get selectedImagePath => _selectedImagePath.value;
+  bool get isSelectedImageFromAssets => _isSelectedImageFromAssets.value;
+  bool get hasSelectedImage => _selectedImagePath.value.isNotEmpty;
 
   // 获取封面图片（过滤掉加载占位符）
   PhotoModel? get coverPhoto {
@@ -420,8 +450,238 @@ class SplashController extends GetxController {
     print('🔄 自动滚动到新内容: ${_autoScrollToNew.value ? "开启" : "关闭"}');
   }
 
+  /// 显示插入占位符在指定位置
+  /// [groupKey] 组名
+  /// [position] 位置
+  void showInsertPlaceholder(String groupKey, int position) {
+    print('🔵 显示插入占位符: 组="$groupKey", 位置=$position');
+    
+    // 取消之前的定时器，实现防抖
+    _placeholderUpdateTimer?.cancel();
+    
+    // 使用防抖延迟更新，避免滑块拖动时频繁更新
+    _placeholderUpdateTimer = Timer(const Duration(milliseconds: 100), () {
+      // 使用 microtask 避免在 build 过程中更新状态
+      Future.microtask(() {
+        _insertPlaceholderGroup.value = groupKey;
+        _insertPlaceholderPosition.value = position;
+        
+        // 强制刷新UI
+        _groupedPhotos.refresh();
+      });
+    });
+  }
+  
+  /// 隐藏插入占位符
+  void hideInsertPlaceholder() {
+    if (_insertPlaceholderGroup.value.isNotEmpty) {
+      print('🔴 隐藏插入占位符');
+      
+      // 使用 scheduleMicrotask 避免在 build 过程中更新状态
+      Future.microtask(() {
+        _insertPlaceholderGroup.value = '';
+        _insertPlaceholderPosition.value = -1;
+        
+        // 强制刷新UI
+        _groupedPhotos.refresh();
+      });
+    }
+  }
+  
+  /// 向指定组的指定位置插入图片
+  /// [groupKey] 组名（如"2024年10月"）
+  /// [position] 插入位置（0表示该组第一个位置）
+  /// [photo] 要插入的照片
+  void insertPhotoAt(String groupKey, int position, PhotoModel photo) {
+    print('📥 向组 "$groupKey" 的位置 $position 插入图片: ${photo.path}');
+    
+    // 1. 先隐藏占位符
+    hideInsertPlaceholder();
+    
+    // 2. 检查目标组是否存在
+    if (!_groupedPhotos.containsKey(groupKey)) {
+      print('❌ 目标组不存在: $groupKey');
+      Get.snackbar('错误', '目标组不存在');
+      return;
+    }
+    
+    // 3. 获取目标组的照片列表
+    final groupPhotos = _groupedPhotos[groupKey]!;
+    
+    // 4. 计算合适的日期：使用目标位置附近照片的日期
+    DateTime targetDate;
+    if (groupPhotos.isEmpty) {
+      // 组为空，使用当前时间
+      targetDate = DateTime.now();
+    } else {
+      // 使用目标位置的照片日期，确保插入后排序正确
+      final targetPosition = position.clamp(0, groupPhotos.length);
+      
+      if (targetPosition >= groupPhotos.length) {
+        // 插入到最后，使用最后一张照片的日期稍后一点
+        targetDate = groupPhotos.last.date.add(const Duration(seconds: 1));
+      } else if (targetPosition == 0) {
+        // 插入到最前，使用第一张照片的日期稍早一点
+        targetDate = groupPhotos.first.date.subtract(const Duration(seconds: 1));
+      } else {
+        // 插入到中间，使用前后两张照片日期的中间值
+        final beforeDate = groupPhotos[targetPosition - 1].date;
+        final afterDate = groupPhotos[targetPosition].date;
+        final millisBetween = afterDate.millisecondsSinceEpoch - beforeDate.millisecondsSinceEpoch;
+        targetDate = beforeDate.add(Duration(milliseconds: millisBetween ~/ 2));
+      }
+    }
+    
+    print('🕒 计算目标日期: $targetDate (组: $groupKey, 位置: $position)');
+    
+    // 5. 创建带有正确日期的新照片对象
+    final photoWithDate = PhotoModel(
+      path: photo.path,
+      date: targetDate,
+      title: photo.title,
+      tags: photo.tags,
+      isNetworkImage: photo.isNetworkImage,
+    );
+    
+    // 6. 添加到总列表
+    _allPhotos.add(photoWithDate);
+    
+    // 7. 重新分组（此时照片会自动按日期排序到正确位置）
+    _updateGroupedPhotos();
+    
+    print('✅ 图片插入成功！当前总数: ${_allPhotos.length}');
+  }
+  
+  /// 获取所有可用的组名列表
+  List<String> get availableGroups {
+    return _groupedPhotos.keys.toList();
+  }
+  
+  /// 获取指定组的照片数量
+  int getGroupPhotoCount(String groupKey) {
+    return _groupedPhotos[groupKey]?.length ?? 0;
+  }
+
+  /// 设置选中的图片（用于在占位符中预览）
+  /// [imagePath] 图片路径
+  /// [isFromAssets] 是否来自 Assets
+  void setSelectedImage(String imagePath, bool isFromAssets) {
+    print('🖼️ 设置选中图片: $imagePath (Assets: $isFromAssets)');
+    _selectedImagePath.value = imagePath;
+    _isSelectedImageFromAssets.value = isFromAssets;
+    
+    // 强制刷新UI，更新占位符显示
+    _groupedPhotos.refresh();
+  }
+  
+  /// 清除选中的图片
+  void clearSelectedImage() {
+    if (_selectedImagePath.value.isNotEmpty) {
+      print('🗑️ 清除选中图片');
+      _selectedImagePath.value = '';
+      _isSelectedImageFromAssets.value = true;
+      
+      // 强制刷新UI
+      _groupedPhotos.refresh();
+    }
+  }
+
+  /// 显示插入面板
+  void showInsertPanel() {
+    _isInsertPanelVisible.value = true;
+    // 确保占位符可见
+    scrollToPlaceholderIfNeeded();
+  }
+
+  /// 隐藏插入面板
+  void hideInsertPanel() {
+    _isInsertPanelVisible.value = false;
+    // 隐藏面板时也清除选中的图片
+    clearSelectedImage();
+  }
+
+  /// 切换插入面板显示状态
+  void toggleInsertPanel() {
+    _isInsertPanelVisible.value = !_isInsertPanelVisible.value;
+    if (_isInsertPanelVisible.value) {
+      scrollToPlaceholderIfNeeded();
+    } else {
+      hideInsertPlaceholder();
+      clearSelectedImage();
+    }
+  }
+
+  /// 计算占位符在滚动视图中的大致位置
+  double calculatePlaceholderPosition() {
+    if (!hasInsertPlaceholder) return 0;
+    
+    final groupKey = _insertPlaceholderGroup.value;
+    final position = _insertPlaceholderPosition.value;
+    
+    // 估算：计算占位符之前有多少张图片
+    int photosBeforePlaceholder = 0;
+    
+    final groupKeys = _groupedPhotos.keys.toList();
+    final placeholderGroupIndex = groupKeys.indexOf(groupKey);
+    
+    // 累加占位符所在组之前所有组的照片数量
+    for (int i = 0; i < placeholderGroupIndex; i++) {
+      final key = groupKeys[i];
+      photosBeforePlaceholder += _groupedPhotos[key]?.length ?? 0;
+    }
+    
+    // 加上占位符在当前组内的位置
+    photosBeforePlaceholder += position;
+    
+    // 估算每张照片的平均高度（假设每张照片约150像素，包括间距和组头部）
+    // 这是一个粗略估算，实际高度取决于屏幕宽度和照片布局
+    const double estimatedPhotoHeight = 150.0;
+    
+    return photosBeforePlaceholder * estimatedPhotoHeight;
+  }
+
+  /// 滚动到占位符位置（如果不可见）
+  Future<void> scrollToPlaceholderIfNeeded() async {
+    if (scrollController == null || !scrollController!.hasClients) {
+      return;
+    }
+    
+    if (!hasInsertPlaceholder) {
+      return;
+    }
+    
+    final placeholderPosition = calculatePlaceholderPosition();
+    final currentScroll = scrollController!.offset;
+    final viewportHeight = scrollController!.position.viewportDimension;
+    
+    // 插入面板高度（展开状态约200px）
+    const double panelHeight = 200.0;
+    
+    // 计算占位符是否在可见区域内（考虑面板遮挡）
+    final visibleTop = currentScroll;
+    final visibleBottom = currentScroll + viewportHeight - panelHeight;
+    
+    // 如果占位符不在可见区域，滚动到该位置
+    if (placeholderPosition < visibleTop || placeholderPosition > visibleBottom) {
+      // 滚动到占位符位置，留出一些上边距
+      final targetScroll = (placeholderPosition - 100).clamp(
+        0.0, 
+        scrollController!.position.maxScrollExtent,
+      );
+      
+      await scrollController!.animateTo(
+        targetScroll,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
   @override
   void onClose() {
+    // 取消占位符更新定时器
+    _placeholderUpdateTimer?.cancel();
+    
     // 停止API自动加载
     apiLoader.stopAutoLoading();
     super.onClose();

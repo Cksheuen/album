@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:album/pages/splash/index.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
@@ -8,6 +9,7 @@ import 'controller.dart';
 import '../../common/widgets/custom_scrollbar.dart';
 import '../../common/widgets/photo_image.dart';
 import '../../common/widgets/photo_loading_placeholder.dart';
+import '../../common/widgets/insert_photo_toolbar.dart';
 
 class SplashPage extends GetView<SplashController> {
   SplashPage({super.key});
@@ -115,6 +117,9 @@ class SplashPage extends GetView<SplashController> {
     // 创建 ScrollController 用于滚动控制
     final scrollController = ScrollController();
     
+    // 将 ScrollController 设置到 controller 中供其他功能使用
+    controller.scrollController = scrollController;
+    
     // 设置新图片加载时的自动滚动回调
     controller.onNewPhotoLoaded = () {
       // 延迟一小段时间，确保UI已更新
@@ -131,10 +136,13 @@ class SplashPage extends GetView<SplashController> {
     };
 
     return Scaffold(
-      body: Obx(() {
-        // 不再显示整体loading，直接显示页面
-        // 每张图片会有独立的加载动画
-        return _PullToRefreshWrapper(
+      body: Stack(
+        children: [
+          // 主相册内容
+          Obx(() {
+            // 不再显示整体loading，直接显示页面
+            // 每张图片会有独立的加载动画
+            return _PullToRefreshWrapper(
           onRefresh: () async {
             await controller.refresh();
           },
@@ -392,19 +400,27 @@ class SplashPage extends GetView<SplashController> {
                   ],
                 ),
                 SliverToBoxAdapter(
-                  child: _VirtualizedGroupedGrid(
+                  child: Obx(() => _VirtualizedGroupedGrid(
                     groupedPhotos: controller.groupedPhotos,
                     crossAxisCount: 4,
                     spacing: 2.0,
                     headerHeight: 40.0,
                     verticalGap: 8.0,
                     showLoadingPlaceholder: controller.hasLoadingPlaceholder,
+                    insertPlaceholderGroup: controller.insertPlaceholderGroup,
+                    insertPlaceholderPosition: controller.insertPlaceholderPosition,
+                    selectedImagePath: controller.selectedImagePath,
+                    isSelectedImageFromAssets: controller.isSelectedImageFromAssets,
+                    onPlaceholderDragged: (groupKey, position) {
+                      // 占位符被拖动到新位置
+                      controller.showInsertPlaceholder(groupKey, position);
+                    },
                     onImageTap: (path) => _showFullScreenImage(
                       context,
                       path,
                       'album_photo_$path',
                     ),
-                  ),
+                  )),
                 ),
                 // 加载更多指示器
                 if (controller.isLoadingMore)
@@ -449,6 +465,79 @@ class SplashPage extends GetView<SplashController> {
           ),
         );
       }),
+          // 底部简化工具栏（只有选择图片和确认按钮）
+          // 仅当 isInsertPanelVisible 为 true 时才显示
+          Obx(() {
+            if (!controller.isInsertPanelVisible) {
+              return const SizedBox.shrink(); // 完全不显示
+            }
+            return Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: InsertPhotoToolbar(
+                onImageSelected: (imagePath, isFromAssets) {
+                  // 图片选中时，更新 controller 中的选中图片信息
+                  controller.setSelectedImage(imagePath, isFromAssets);
+                },
+                onConfirmInsert: (photo) {
+                  // 使用当前占位符的位置插入图片
+                  if (controller.hasInsertPlaceholder) {
+                    controller.insertPhotoAt(
+                      controller.insertPlaceholderGroup,
+                      controller.insertPlaceholderPosition,
+                      photo,
+                    );
+                    // 插入成功后关闭工具栏和占位符
+                    controller.hideInsertPanel();
+                    controller.hideInsertPlaceholder();
+                  } else {
+                    Get.snackbar(
+                      '提示',
+                      '请先拖动占位符到目标位置',
+                      snackPosition: SnackPosition.TOP,
+                    );
+                  }
+                },
+                onCancel: () {
+                  // 取消插入
+                  controller.hideInsertPanel();
+                  controller.hideInsertPlaceholder();
+                },
+              ),
+            );
+          }),
+        ],
+      ),
+      // 浮动按钮：控制插入面板显示
+      // 浮动按钮：仅在非插入模式时显示
+      floatingActionButton: Obx(() {
+        // 插入模式打开时隐藏 FAB，因为工具栏左侧已有关闭按钮
+        if (controller.isInsertPanelVisible) {
+          return const SizedBox.shrink();
+        }
+        
+        return FloatingActionButton(
+          onPressed: () {
+            if (controller.availableGroups.isEmpty) {
+              Get.snackbar(
+                '提示', 
+                '暂无分组，请先添加一些图片',
+                snackPosition: SnackPosition.TOP,
+              );
+              return;
+            }
+            
+            // 显示插入模式：在第一个组的末尾显示占位符
+            final firstGroup = controller.availableGroups.first;
+            final groupPhotoCount = controller.getGroupPhotoCount(firstGroup);
+            controller.showInsertPlaceholder(firstGroup, groupPhotoCount);
+            controller.toggleInsertPanel();
+          },
+          child: const Icon(Icons.add_photo_alternate),
+          tooltip: '插入图片',
+        );
+      }),
     );
   }
 }
@@ -464,6 +553,11 @@ class _VirtualizedGroupedGrid extends StatefulWidget {
   final double verticalGap;
   final void Function(String path) onImageTap;
   final bool showLoadingPlaceholder; // 是否显示加载占位符
+  final String insertPlaceholderGroup; // 插入占位符的组名
+  final int insertPlaceholderPosition; // 插入占位符的位置
+  final void Function(String groupKey, int position)? onPlaceholderDragged; // 占位符拖动回调
+  final String selectedImagePath; // 选中的图片路径
+  final bool isSelectedImageFromAssets; // 选中的图片是否来自 Assets
 
   const _VirtualizedGroupedGrid({
     Key? key,
@@ -474,6 +568,11 @@ class _VirtualizedGroupedGrid extends StatefulWidget {
     this.verticalGap = 8.0,
     required this.onImageTap,
     this.showLoadingPlaceholder = false,
+    this.insertPlaceholderGroup = '',
+    this.insertPlaceholderPosition = -1,
+    this.onPlaceholderDragged,
+    this.selectedImagePath = '',
+    this.isSelectedImageFromAssets = true,
   }) : super(key: key);
 
   @override
@@ -575,35 +674,292 @@ class _VirtualizedGroupedGridState extends State<_VirtualizedGroupedGrid> {
     return !(bottom < expandedTop || top > expandedBottom);
   }
 
-  /// 构建照片项（支持加载占位符）
-  Widget _buildPhotoItem(dynamic photo, String heroTag, double itemSize) {
+  /// 构建照片项（支持加载占位符和拖放目标）
+  Widget _buildPhotoItem(
+    dynamic photo, 
+    String heroTag, 
+    double itemSize,
+    {String? groupKey, 
+    int? position}
+  ) {
     // 检测是否为加载占位符
     final bool isLoadingPlaceholder = photo.path == '__loading_placeholder__';
     
+    Widget photoWidget;
+    
     if (isLoadingPlaceholder) {
       // 显示加载占位符
-      return CompactPhotoLoadingPlaceholder(size: itemSize);
+      photoWidget = CompactPhotoLoadingPlaceholder(size: itemSize);
+    } else {
+      // 正常照片
+      photoWidget = InkWell(
+        onTap: () => widget.onImageTap(photo.path),
+        onLongPress: () {
+          // keep existing behavior placeholder
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.white, width: 1),
+          ),
+          child: Hero(
+            tag: heroTag,
+            child: SmartImage(
+              path: photo.path,
+              isNetwork: photo.isNetworkImage,
+              fit: BoxFit.cover,
+            ),
+          ),
+        ),
+      );
     }
     
-    // 正常照片
-    return InkWell(
-      onTap: () => widget.onImageTap(photo.path),
-      onLongPress: () {
-        // keep existing behavior placeholder
+    // 如果提供了 groupKey 和 position，包裹 DragTarget 以接受占位符拖放
+    if (groupKey != null && position != null && !isLoadingPlaceholder) {
+      return DragTarget<Map<String, dynamic>>(
+        onWillAcceptWithDetails: (details) {
+          // 只接受占位符类型的拖放
+          return details.data['type'] == 'placeholder';
+        },
+        onAcceptWithDetails: (details) {
+          // 占位符被拖放到此位置，更新占位符位置
+          widget.onPlaceholderDragged?.call(groupKey, position);
+        },
+        builder: (context, candidateData, rejectedData) {
+          // 如果正在悬停，显示视觉反馈
+          final bool isHovering = candidateData.isNotEmpty;
+          
+          return Container(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: isHovering ? Colors.blue : Colors.white,
+                width: isHovering ? 3 : 1,
+              ),
+              boxShadow: isHovering ? [
+                BoxShadow(
+                  color: Colors.blue.withOpacity(0.3),
+                  blurRadius: 8,
+                  spreadRadius: 2,
+                ),
+              ] : null,
+            ),
+            child: photoWidget,
+          );
+        },
+      );
+    }
+    
+    return photoWidget;
+  }
+  
+  /// 构建空白位置的拖放目标
+  /// 用于在组的最后行填充空白位置，使占位符可以拖放到组的末尾
+  Widget _buildEmptyDropTarget({
+    required String groupKey,
+    required int position,
+    required double itemSize,
+  }) {
+    return DragTarget<Map<String, dynamic>>(
+      onWillAcceptWithDetails: (details) {
+        // 只接受占位符类型的拖放
+        return details.data['type'] == 'placeholder';
       },
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.white, width: 1),
-        ),
-        child: Hero(
-          tag: heroTag,
-          child: SmartImage(
-            path: photo.path,
-            isNetwork: photo.isNetworkImage,
-            fit: BoxFit.cover,
+      onAcceptWithDetails: (details) {
+        // 占位符被拖放到此空白位置
+        // 将位置调整为该组的实际照片数量（即最后一个位置）
+        final groupPhotos = widget.groupedPhotos[groupKey] ?? [];
+        final actualPosition = groupPhotos.length; // 插入到最后
+        
+        print('🎯 拖放到空白位置: 组=$groupKey, 网格位置=$position, 实际位置=$actualPosition');
+        widget.onPlaceholderDragged?.call(groupKey, actualPosition);
+      },
+      builder: (context, candidateData, rejectedData) {
+        // 如果正在悬停，显示视觉反馈
+        final bool isHovering = candidateData.isNotEmpty;
+        
+        return Container(
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: isHovering ? Colors.blue.withOpacity(0.5) : Colors.transparent,
+              width: isHovering ? 2 : 0,
+            ),
+            borderRadius: BorderRadius.circular(4),
+            color: isHovering ? Colors.blue.withOpacity(0.1) : Colors.transparent,
+          ),
+          child: isHovering
+              ? Center(
+                  child: Icon(
+                    Icons.add_circle_outline,
+                    color: Colors.blue[400],
+                    size: itemSize * 0.4,
+                  ),
+                )
+              : null,
+        );
+      },
+    );
+  }
+  
+  /// 构建插入占位符（带动画效果，支持拖动）
+  Widget _buildInsertPlaceholder(double itemSize) {
+    // 检查是否有选中的图片
+    final bool hasSelectedImage = widget.selectedImagePath.isNotEmpty;
+    
+    Widget placeholderContent;
+    
+    if (hasSelectedImage) {
+      // 有选中图片：直接显示图片
+      placeholderContent = ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: widget.isSelectedImageFromAssets
+            ? Image.asset(
+                widget.selectedImagePath,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return const Center(
+                    child: Icon(Icons.error, color: Colors.red),
+                  );
+                },
+              )
+            : Image.file(
+                File(widget.selectedImagePath),
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return const Center(
+                    child: Icon(Icons.error, color: Colors.red),
+                  );
+                },
+              ),
+      );
+    } else {
+      // 无选中图片：显示"插入位置"提示
+      placeholderContent = Stack(
+        fit: StackFit.expand,
+        children: [
+          // 脉冲动画背景
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.3, end: 1.0),
+            duration: const Duration(milliseconds: 1000),
+            curve: Curves.easeInOut,
+            builder: (context, value, child) {
+              return Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(6),
+                  gradient: RadialGradient(
+                    colors: [
+                      Colors.blue.withOpacity(value * 0.3),
+                      Colors.blue.withOpacity(value * 0.1),
+                    ],
+                  ),
+                ),
+              );
+            },
+            onEnd: () {
+              // 循环动画
+              if (mounted) {
+                setState(() {});
+              }
+            },
+          ),
+          
+          // 中心图标和文字
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0.8, end: 1.2),
+                  duration: const Duration(milliseconds: 800),
+                  curve: Curves.easeInOut,
+                  builder: (context, value, child) {
+                    return Transform.scale(
+                      scale: value,
+                      child: Icon(
+                        Icons.add_circle_outline,
+                        color: Colors.blue[700],
+                        size: itemSize * 0.3,
+                      ),
+                    );
+                  },
+                  onEnd: () {
+                    if (mounted) {
+                      setState(() {});
+                    }
+                  },
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '插入位置',
+                  style: TextStyle(
+                    color: Colors.blue[700],
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '长按拖动',
+                  style: TextStyle(
+                    color: Colors.blue[600],
+                    fontSize: 8,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+    
+    final placeholderWidget = Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.blue, width: 3),
+        borderRadius: BorderRadius.circular(8),
+        color: hasSelectedImage ? Colors.transparent : Colors.blue[50],
+      ),
+      child: placeholderContent,
+    );
+
+    // 使用 LongPressDraggable 使占位符可拖动
+    return LongPressDraggable<Map<String, dynamic>>(
+      data: {
+        'type': 'placeholder',
+        'groupKey': widget.insertPlaceholderGroup,
+        'position': widget.insertPlaceholderPosition,
+      },
+      feedback: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: itemSize,
+          height: itemSize,
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.blue, width: 3),
+            borderRadius: BorderRadius.circular(8),
+            color: Colors.blue[100]?.withOpacity(0.8),
+          ),
+          child: Center(
+            child: Icon(
+              Icons.add_circle,
+              color: Colors.blue[700],
+              size: itemSize * 0.4,
+            ),
           ),
         ),
       ),
+      childWhenDragging: Container(
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.blue.withOpacity(0.3), width: 2),
+          borderRadius: BorderRadius.circular(8),
+          color: Colors.blue[50]?.withOpacity(0.3),
+        ),
+        child: Center(
+          child: Icon(
+            Icons.drag_indicator,
+            color: Colors.blue[300],
+            size: itemSize * 0.3,
+          ),
+        ),
+      ),
+      child: placeholderWidget,
     );
   }
 
@@ -666,13 +1022,24 @@ class _VirtualizedGroupedGridState extends State<_VirtualizedGroupedGrid> {
 
           yOffset += headerHeight;
 
+          // 检查是否需要在此组显示插入占位符
+          final bool showInsertInThisGroup = 
+              widget.insertPlaceholderGroup == groupTitle && 
+              widget.insertPlaceholderPosition >= 0;
+          
+          // 计算实际要渲染的项目数（包含占位符）
           final int photoCount = photos.length;
-          final int rows = (photoCount / crossAxisCount).ceil();
+          final int totalItemCount = showInsertInThisGroup 
+              ? photoCount + 1 
+              : photoCount;
+          
+          // 计算需要渲染的网格位置数（填充到完整的行）
+          final int rows = (totalItemCount / crossAxisCount).ceil();
+          final int gridPositions = rows * crossAxisCount; // 包括空白位置
           final double groupHeight = rows * itemSize + (rows - 1) * spacing;
 
-          // only iterate and add AnimatedPositioned for items that intersect viewport
-          for (int i = 0; i < photoCount; i++) {
-            final photo = photos[i];
+          // 渲染所有网格位置（包括空白位置和占位符）
+          for (int i = 0; i < gridPositions; i++) {
             final int col = i % crossAxisCount;
             final int row = i ~/ crossAxisCount;
             final double left = col * (itemSize + spacing);
@@ -681,27 +1048,79 @@ class _VirtualizedGroupedGridState extends State<_VirtualizedGroupedGrid> {
             // If this item's rect isn't in viewport, skip creating widget to save cost.
             if (!_rectIntersectsViewport(top, itemSize)) continue;
 
-            // 使用照片路径和日期作为唯一key，确保key在分组变化时保持稳定
-            // 这样AnimatedPositioned才能正确追踪widget并应用过渡动画
-            final uniqueKey =
-                '${photo.path}_${photo.date.millisecondsSinceEpoch}';
-            final heroTag = 'album_photo_$uniqueKey';
-
-            children.add(
-              AnimatedPositioned(
-                key: ValueKey('photo_$uniqueKey'),
-                duration: const Duration(milliseconds: 400),
-                curve: Curves.easeInOut,
-                left: left,
-                top: top,
-                width: itemSize,
-                height: itemSize,
-                child: Material(
-                  color: Colors.transparent,
-                  child: _buildPhotoItem(photo, heroTag, itemSize),
+            // 判断当前位置是否是插入占位符位置
+            if (showInsertInThisGroup && i == widget.insertPlaceholderPosition) {
+              // 渲染插入占位符
+              children.add(
+                AnimatedPositioned(
+                  key: const ValueKey('insert_placeholder'),
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                  left: left,
+                  top: top,
+                  width: itemSize,
+                  height: itemSize,
+                  child: _buildInsertPlaceholder(itemSize),
                 ),
-              ),
-            );
+              );
+            } else {
+              // 计算实际照片索引（如果当前组有占位符且在占位符后，需要减1）
+              final int photoIndex = showInsertInThisGroup && 
+                                     i > widget.insertPlaceholderPosition 
+                  ? i - 1 
+                  : i;
+              
+              if (photoIndex < photoCount) {
+                // 有照片：渲染照片
+                final photo = photos[photoIndex];
+                
+                // 使用照片路径和日期作为唯一key，确保key在分组变化时保持稳定
+                // 这样AnimatedPositioned才能正确追踪widget并应用过渡动画
+                final uniqueKey =
+                    '${photo.path}_${photo.date.millisecondsSinceEpoch}';
+                final heroTag = 'album_photo_$uniqueKey';
+
+                children.add(
+                  AnimatedPositioned(
+                    key: ValueKey('photo_$uniqueKey'),
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeInOut,
+                    left: left,
+                    top: top,
+                    width: itemSize,
+                    height: itemSize,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: _buildPhotoItem(
+                        photo, 
+                        heroTag, 
+                        itemSize,
+                        groupKey: groupTitle,
+                        position: i,
+                      ),
+                    ),
+                  ),
+                );
+              } else {
+                // 空白位置：渲染透明的 DragTarget
+                children.add(
+                  AnimatedPositioned(
+                    key: ValueKey('empty_${groupTitle}_$i'),
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeInOut,
+                    left: left,
+                    top: top,
+                    width: itemSize,
+                    height: itemSize,
+                    child: _buildEmptyDropTarget(
+                      groupKey: groupTitle,
+                      position: i,
+                      itemSize: itemSize,
+                    ),
+                  ),
+                );
+              }
+            }
           }
 
           yOffset += groupHeight + verticalGap;

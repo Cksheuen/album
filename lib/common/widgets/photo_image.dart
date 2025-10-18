@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/photo_model.dart';
+import 'dart:io';
 
 /// 通用图片组件，支持本地资源和网络图片
 class PhotoImage extends StatelessWidget {
@@ -137,6 +138,9 @@ class SmartImage extends StatelessWidget {
     // 自动判断是否为网络图片
     final isNetworkUrl =
         path.startsWith('http://') || path.startsWith('https://');
+    
+    // 判断是否为文件路径（相册选择的图片）
+    final isFilePath = path.startsWith('/') || path.contains('file://');
 
     if (isNetwork || isNetworkUrl) {
       return CachedNetworkImage(
@@ -203,6 +207,37 @@ class SmartImage extends StatelessWidget {
       );
     }
 
+    // 如果是文件路径，使用 Image.file
+    if (isFilePath) {
+      return Image.file(
+        File(path.replaceFirst('file://', '')),
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            color: Colors.grey[400],
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.image_not_supported,
+                  color: Colors.white,
+                  size: 40,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '图片不存在',
+                  style: TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+
+    // 默认使用 assets
     return Image.asset(path, width: width, height: height, fit: fit);
   }
 }

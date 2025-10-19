@@ -31,6 +31,7 @@ class SplashPage extends GetView<SplashController> {
     // 立即导航，使用 Hero 动画实现平滑过渡
     Navigator.of(context).push(
       PageRouteBuilder(
+        opaque: false, // 允许背景透明，实现更流畅的过渡
         pageBuilder: (context, animation, secondaryAnimation) {
           return Scaffold(
             backgroundColor: Colors.black,
@@ -74,6 +75,53 @@ class SplashPage extends GetView<SplashController> {
               child: Center(
                 child: Hero(
                   tag: heroTag,
+                  // 优化 Hero 动画的飞行效果：实现从 cover 到 contain 的平滑过渡
+                  // 通过在飞行过程中调整 BoxFit，让图片显示方式也有过渡效果
+                  flightShuttleBuilder: (
+                    BuildContext flightContext,
+                    Animation<double> animation,
+                    HeroFlightDirection flightDirection,
+                    BuildContext fromHeroContext,
+                    BuildContext toHeroContext,
+                  ) {
+                    // 在飞行过程中使用更流畅的动画曲线
+                    final curvedAnimation = CurvedAnimation(
+                      parent: animation,
+                      curve: flightDirection == HeroFlightDirection.push
+                          ? Curves.easeOutCubic  // 打开时：快速启动，慢慢减速
+                          : Curves.easeInCubic,   // 关闭时：慢慢启动，快速结束
+                    );
+                    
+                    return AnimatedBuilder(
+                      animation: curvedAnimation,
+                      builder: (context, child) {
+                        final progress = curvedAnimation.value;
+                        
+                        // 根据动画方向和进度决定 BoxFit
+                        // push: 0.0(cover) -> 1.0(contain)
+                        // pop:  1.0(contain) -> 0.0(cover)
+                        final BoxFit fit;
+                        if (flightDirection == HeroFlightDirection.push) {
+                          // 打开：在动画的前 70% 保持 cover，后 30% 切换到 contain
+                          // 这样可以确保图片在大部分放大过程中保持裁剪状态
+                          fit = progress < 0.7 ? BoxFit.cover : BoxFit.contain;
+                        } else {
+                          // 关闭：在动画的前 30% 保持 contain，后 70% 切换到 cover
+                          // 这样可以确保图片在大部分缩小过程中显示完整
+                          fit = progress > 0.3 ? BoxFit.contain : BoxFit.cover;
+                        }
+                        
+                        return Material(
+                          color: Colors.transparent,
+                          child: SmartImage(
+                            path: imageAsset,
+                            isNetwork: imageAsset.startsWith('http'),
+                            fit: fit,
+                          ),
+                        );
+                      },
+                    );
+                  },
                   child: InteractiveViewer(
                     minScale: 0.5,
                     maxScale: 3.0,
@@ -88,18 +136,19 @@ class SplashPage extends GetView<SplashController> {
             ),
           );
         },
-        transitionDuration: Duration(milliseconds: 400),
-        reverseTransitionDuration: Duration(milliseconds: 300),
+        transitionDuration: Duration(milliseconds: 350), // 缩短动画时间，更流畅
+        reverseTransitionDuration: Duration(milliseconds: 350),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          // 使用淡入和缩放的组合动画
+          // 使用更平滑的曲线和背景淡入效果
+          final curvedAnimation = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic, // 更流畅的曲线
+            reverseCurve: Curves.easeInCubic,
+          );
+
           return FadeTransition(
-            opacity: animation,
-            child: ScaleTransition(
-              scale: Tween<double>(begin: 0.9, end: 1.0).animate(
-                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-              ),
-              child: child,
-            ),
+            opacity: curvedAnimation,
+            child: child,
           );
         },
       ),
@@ -1084,10 +1133,9 @@ class _VirtualizedGroupedGridState extends State<_VirtualizedGroupedGrid> {
                 // 有照片：渲染照片
                 final photo = photos[photoIndex];
                 
-                // 使用照片路径和日期作为唯一key，确保key在分组变化时保持稳定
-                // 这样AnimatedPositioned才能正确追踪widget并应用过渡动画
-                final uniqueKey =
-                    '${photo.path}_${photo.date.millisecondsSinceEpoch}';
+                // 使用照片路径作为唯一key和heroTag
+                // 路径在相册中是唯一的，足以标识照片
+                final uniqueKey = photo.path;
                 final heroTag = 'album_photo_$uniqueKey';
 
                 children.add(

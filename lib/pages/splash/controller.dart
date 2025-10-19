@@ -824,10 +824,9 @@ class SplashController extends GetxController {
             const SizedBox(height: 8),
             if (photo.title != null) 
               _buildDetailRow('标题', photo.title!),
-            if (photo.tags != null && photo.tags!.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              _buildDetailRow('标签', photo.tags!.join(', ')),
-            ],
+            const SizedBox(height: 8),
+            // 标签编辑区域
+            _buildEditableTagsRow(photo),
             const SizedBox(height: 8),
             _buildDetailRow('类型', photo.isNetworkImage ? '网络图片' : '本地图片'),
           ],
@@ -870,6 +869,271 @@ class SplashController extends GetxController {
         ),
       ],
     );
+  }
+
+  /// 构建可编辑的标签行
+  Widget _buildEditableTagsRow(PhotoModel photo) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 60,
+          child: Text(
+            '标签:',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[700],
+            ),
+          ),
+        ),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 显示当前标签
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (photo.tags != null && photo.tags!.isNotEmpty)
+                    ...photo.tags!.map((tag) => _buildTagChip(photo, tag))
+                  else
+                    Text(
+                      '暂无标签',
+                      style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              // 编辑按钮
+              TextButton.icon(
+                onPressed: () => _showEditTagsDialog(photo),
+                icon: const Icon(Icons.edit, size: 16),
+                label: const Text('编辑标签', style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 构建标签芯片
+  Widget _buildTagChip(PhotoModel photo, String tag) {
+    return Chip(
+      label: Text(tag, style: const TextStyle(fontSize: 12)),
+      backgroundColor: Colors.blue[50],
+      deleteIcon: const Icon(Icons.close, size: 16),
+      onDeleted: () => _removeTag(photo, tag),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+  }
+
+  /// 显示编辑标签对话框
+  void _showEditTagsDialog(PhotoModel photo) {
+    final TextEditingController tagController = TextEditingController();
+    final RxList<String> currentTags = RxList<String>(photo.tags ?? []);
+
+    Get.dialog(
+      AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.label, color: Colors.blue),
+            SizedBox(width: 12),
+            Text('编辑标签'),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 当前标签显示
+              Text(
+                '当前标签:',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[700],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Obx(() => Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (currentTags.isEmpty)
+                    Text(
+                      '暂无标签',
+                      style: TextStyle(color: Colors.grey[500]),
+                    )
+                  else
+                    ...currentTags.map((tag) => Chip(
+                      label: Text(tag),
+                      backgroundColor: Colors.blue[50],
+                      deleteIcon: const Icon(Icons.close, size: 16),
+                      onDeleted: () {
+                        currentTags.remove(tag);
+                      },
+                    )),
+                ],
+              )),
+              const SizedBox(height: 16),
+              // 添加新标签输入框
+              TextField(
+                controller: tagController,
+                decoration: InputDecoration(
+                  labelText: '添加新标签',
+                  hintText: '输入标签名称',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.add),
+                    onPressed: () {
+                      final newTag = tagController.text.trim();
+                      if (newTag.isNotEmpty && !currentTags.contains(newTag)) {
+                        currentTags.add(newTag);
+                        tagController.clear();
+                      }
+                    },
+                  ),
+                ),
+                onSubmitted: (value) {
+                  final newTag = value.trim();
+                  if (newTag.isNotEmpty && !currentTags.contains(newTag)) {
+                    currentTags.add(newTag);
+                    tagController.clear();
+                  }
+                },
+              ),
+              const SizedBox(height: 16),
+              // 常用标签快捷选择
+              Text(
+                '常用标签:',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[700],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: allTags.map((tag) {
+                  return Obx(() {
+                    final isSelected = currentTags.contains(tag);
+                    return FilterChip(
+                      label: Text(tag),
+                      selected: isSelected,
+                      onSelected: (selected) {
+                        if (selected) {
+                          if (!currentTags.contains(tag)) {
+                            currentTags.add(tag);
+                          }
+                        } else {
+                          currentTags.remove(tag);
+                        }
+                      },
+                    );
+                  });
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final tagsToSave = currentTags.toList();
+              Get.back(); // 先关闭编辑对话框
+              // 使用 Future.delayed 避免状态冲突
+              Future.delayed(const Duration(milliseconds: 100), () {
+                Get.back(); // 关闭详情对话框
+                // 先更新标签数据（不显示 Snackbar）
+                _updatePhotoTags(photo, tagsToSave, showSnackbar: false);
+                // 立即重新打开详情对话框
+                Future.delayed(const Duration(milliseconds: 100), () {
+                  viewPhotoDetails(photo.path);
+                  // 在详情对话框完全打开后显示一个简短的提示
+                  // Future.delayed(const Duration(milliseconds: 200), () {
+                  //   // 使用 snackbar 但配置为完全不阻挡
+                  //   Get.showSnackbar(
+                  //     GetSnackBar(
+                  //       message: '标签已更新',
+                  //       icon: const Icon(Icons.check_circle, color: Colors.white),
+                  //       duration: const Duration(milliseconds: 1500), // 更短的显示时间
+                  //       snackPosition: SnackPosition.TOP,
+                  //       backgroundColor: Colors.green.withOpacity(0.9),
+                  //       margin: const EdgeInsets.all(16),
+                  //       borderRadius: 8,
+                  //       isDismissible: true,
+                  //       dismissDirection: DismissDirection.horizontal,
+                  //       forwardAnimationCurve: Curves.easeOutBack,
+                  //       backgroundGradient: LinearGradient(
+                  //         colors: [Colors.green.shade600, Colors.green.shade400],
+                  //       ),
+                  //     ),
+                  //   );
+                  // });
+                });
+              });
+            },
+            child: const Text('保存'),
+          ),
+        ],
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+      ),
+    );
+  }
+
+  /// 移除标签
+  void _removeTag(PhotoModel photo, String tag) {
+    if (photo.tags != null) {
+      final updatedTags = List<String>.from(photo.tags!);
+      updatedTags.remove(tag);
+      _updatePhotoTags(photo, updatedTags, showSnackbar: false);
+      // 使用 Future.delayed 避免状态冲突
+      Get.back(); // 关闭详情对话框
+      Future.delayed(const Duration(milliseconds: 100), () {
+        viewPhotoDetails(photo.path); // 重新打开详情对话框
+      });
+    }
+  }
+
+  /// 更新照片标签
+  void _updatePhotoTags(PhotoModel photo, List<String> newTags, {bool showSnackbar = true}) {
+    photo.tags = newTags;
+    // 触发界面更新
+    _allPhotos.refresh();
+    _updateGroupedPhotos();
+    
+    print('✅ 更新照片标签: ${photo.path}, 新标签: $newTags');
+    
+    if (showSnackbar) {
+      // 显示成功提示
+      Get.snackbar(
+        '成功',
+        '标签已更新',
+        snackPosition: SnackPosition.TOP,
+        duration: const Duration(seconds: 2),
+        backgroundColor: Colors.green.withOpacity(0.9),
+        colorText: Colors.white,
+        icon: const Icon(Icons.check_circle, color: Colors.white),
+        margin: const EdgeInsets.all(16),
+        borderRadius: 8,
+      );
+    }
   }
 
   /// 设为壁纸

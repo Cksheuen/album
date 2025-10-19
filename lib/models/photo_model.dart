@@ -2,7 +2,7 @@ class PhotoModel {
   final String path;
   final DateTime date;
   final String? title;
-  final List<String>? tags;
+  List<String>? tags; // 改为可变的，支持修改标签
   final bool isNetworkImage; // 标识是否为网络图片
 
   PhotoModel({

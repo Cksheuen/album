@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "com.example.album"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // ndkVersion = flutter.ndkVersion  // 禁用 NDK，如果不需要的话
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

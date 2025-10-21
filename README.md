@@ -318,43 +318,35 @@ flutter build web
 
 ## 📚 文档
 
-详细文档请查看：
+详细文档请查看 **[docs/](./docs/)** 文件夹：
 
-- 📖 **[DEVELOPMENT.md](./DEVELOPMENT.md)** - 完整开发文档
-  - 技术栈详解
-  - 三种加载模式
-  - GetX 最佳实践
-  - API 集成指南
-  - 性能优化技巧
+### 📖 主要文档
+- **[文档索引 (INDEX.md)](./docs/INDEX.md)** - 完整的文档索引和分类查找 ⭐
+- **[文档总览 (README.md)](./docs/README.md)** - 文档结构和快速导航
+- **[项目结构 (PROJECT_STRUCTURE.md)](./docs/PROJECT_STRUCTURE.md)** - 代码架构和文件组织
+- **[开发指南 (DEVELOPMENT.md)](./docs/DEVELOPMENT.md)** - 环境搭建和开发流程
+- **[权限配置 (PERMISSIONS_SETUP.md)](./docs/PERMISSIONS_SETUP.md)** - 平台权限配置说明
 
-- 📖 **[FEATURE_INSERT_PHOTO.md](./FEATURE_INSERT_PHOTO.md)** - 图片插入功能说明 ⭐ 新增
-  - 功能特性详解
-  - 使用流程说明
-  - 技术实现细节
-  - 权限配置指南
+### ✨ 功能特性文档（Features）
+- **[插入照片功能](./docs/features/FEATURE_INSERT_PHOTO.md)** - 核心插入功能 ⭐
+- **[可拖动占位符](./docs/features/FEATURE_DRAGGABLE_INSERT_PLACEHOLDER.md)** - 拖动调整位置
+- **[简化工具栏](./docs/features/FEATURE_SIMPLIFIED_TOOLBAR.md)** - 简洁的操作界面
 
-- 📖 **[PERMISSIONS_SETUP.md](./PERMISSIONS_SETUP.md)** - 权限配置指南
-  - iOS 权限配置
-  - Android 权限配置
-  - 常见问题解答
+### 🐛 Bug 修复文档（Bugfixes）
+- **[插入位置修复](./docs/bugfixes/BUGFIX_INSERT_POSITION.md)** - 精确插入位置
+- **[图片加载修复](./docs/bugfixes/BUGFIX_IMAGE_LOADING_FREEZE.md)** - 解决卡死问题
+- **[setState 错误修复](./docs/bugfixes/BUGFIX_SETSTATE_DURING_BUILD.md)** - build 中更新状态
+- **[工具栏溢出修复](./docs/bugfixes/BUGFIX_TOOLBAR_OVERFLOW.md)** - 小屏幕适配
 
-- 📖 **[PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md)** - 项目结构说明
-  - 文件组织架构
-  - 依赖关系图
-  - 核心模块介绍
+### ⚡ 优化改进文档（Improvements）
+- **[占位符图片预览](./docs/improvements/IMPROVEMENT_PLACEHOLDER_IMAGE_PREVIEW.md)** - 所见即所得
+- **[拖动到空白位置](./docs/improvements/IMPROVEMENT_DRAG_TO_EMPTY_SLOT.md)** - 支持组末尾
+- **[工具栏 UI 优化](./docs/improvements/IMPROVEMENT_TOOLBAR_UI.md)** - 视觉完整性
 
-- 📖 **[OPTIMIZATION_SUMMARY.md](./OPTIMIZATION_SUMMARY.md)** - 优化总结
-  - 优化前后对比
-  - 性能提升数据
-  - 最佳实践建议
+### 📦 归档文档（Archived）
+- **[归档文档索引](./docs/archived/ARCHIVED_INDEX.md)** - 旧版本和参考文档
 
-## 🐛 已知问题修复
-
-本项目已修复以下问题：
-
-- ✅ **Assets 加载"加载更多"提示** - [ASSETS_LOADING_FIX.md](./ASSETS_LOADING_FIX.md)
-- ✅ **滚动条拖拽对齐问题** - [SCROLLBAR_BUG_FIX_FINAL.md](./SCROLLBAR_BUG_FIX_FINAL.md)
-- ✅ **分组切换滚动条更新** - [SCROLLBAR_GROUP_UPDATE_FIX.md](./SCROLLBAR_GROUP_UPDATE_FIX.md)
+> 💡 **提示**: 建议从 [docs/INDEX.md](./docs/INDEX.md) 开始浏览，那里有完整的文档分类和快速查找指南。
 
 ## ❓ 常见问题
 

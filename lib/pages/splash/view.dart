@@ -772,16 +772,16 @@ class _VirtualizedGroupedGridState extends State<_VirtualizedGroupedGrid> {
           return details.data['type'] == 'placeholder';
         },
         onAcceptWithDetails: (details) {
-          // 占位符被拖放到此位置
-          // 🔧 修复：如果拖到最后一张照片，将其视为"插入到末尾"
-          final groupPhotos = widget.groupedPhotos[groupKey] ?? [];
-          final isLastPhoto = position == groupPhotos.length - 1;
-          final actualPosition = isLastPhoto ? groupPhotos.length : position;
+          // 占位符被拖放到照片位置
+          // 直接使用照片的索引作为插入位置（插入到该照片之前）
+          print('🎯 拖放到照片: 组=$groupKey, 照片索引=$position, 插入位置=$position');
           
-          print('🎯 拖放到照片: 组=$groupKey, 照片索引=$position, '
-               '实际位置=$actualPosition ${isLastPhoto ? "(末尾)" : ""}');
-          
-          widget.onPlaceholderDragged?.call(groupKey, actualPosition);
+          widget.onPlaceholderDragged?.call(groupKey, position);
+        },
+        onMove: (details) {
+          // 🔥 新增：拖动过程中实时更新占位组件的位置
+          // 让用户在拖动时就能看到照片会插入到哪里
+          widget.onPlaceholderDragged?.call(groupKey, position);
         },
         builder: (context, candidateData, rejectedData) {
           // 如果正在悬停，显示视觉反馈
@@ -829,6 +829,13 @@ class _VirtualizedGroupedGridState extends State<_VirtualizedGroupedGrid> {
         final actualPosition = groupPhotos.length; // 插入到最后
         
         print('🎯 拖放到空白位置: 组=$groupKey, 网格位置=$position, 实际位置=$actualPosition');
+        widget.onPlaceholderDragged?.call(groupKey, actualPosition);
+      },
+      onMove: (details) {
+        // 🔥 新增：拖动过程中实时更新占位组件的位置
+        // 空白区域统一插入到组的末尾
+        final groupPhotos = widget.groupedPhotos[groupKey] ?? [];
+        final actualPosition = groupPhotos.length;
         widget.onPlaceholderDragged?.call(groupKey, actualPosition);
       },
       builder: (context, candidateData, rejectedData) {
@@ -980,6 +987,8 @@ class _VirtualizedGroupedGridState extends State<_VirtualizedGroupedGrid> {
 
     // 使用 LongPressDraggable 使占位符可拖动
     return LongPressDraggable<Map<String, dynamic>>(
+      // 设置长按延迟时间，默认是 500ms，调整为 300ms 更快响应
+      delay: const Duration(milliseconds: 300),
       data: {
         'type': 'placeholder',
         'groupKey': widget.insertPlaceholderGroup,
